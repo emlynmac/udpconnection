@@ -1,6 +1,6 @@
 # UdpConnection
 
-A Combine-style wrapper around Network's NWConnection with a UDP protocol
+Am async wrapper around Network's NWConnection, for User Datagram Protocol
 
 Usage:
 
@@ -10,30 +10,21 @@ let connection = UdpConnection.live(url: yourUrl, queue: yourDispatchQueue)
 // Send with 
 connection.send(data)
 
-// Receive by subscribing to the receiveDataPublisher
-let receiver = connection.receiveDataPublisher
-  .sink(
-    receiveCompletion: { completion in
-      
-    },
-    receiveValue: { data in
-     
-    }
-  )
+// Receive by awaiting the data on the receivedData stream:
+for await data in connection.receivedData {
+  // DO SOMETHING WITH THE DATA
+}
   
-// Track errors and state with
-let state = connection.statePublisher.sink(
-  receiveCompletion: { completion in
-    // Handle the completion, possible error
-  },
-  receiveValue: { state in
-    switch state {
+// Track errors and state with the connectionState stream:
+Task {
+  for await state in connection.connectionState {
+      switch state {
     case .ready:
-      // Handle ready
+      // Start sending / receiving
       
     default:
       // Handle other things
     }
-  })
-  
+  }
+}
 ```

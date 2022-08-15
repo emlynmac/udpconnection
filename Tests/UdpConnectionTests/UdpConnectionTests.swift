@@ -3,7 +3,7 @@ import XCTest
 
 final class UdpConnectionTests: XCTestCase {
    
-  func testRoundTrip() throws {
+  func testRoundTrip() async throws {
     //  ncat -e /bin/cat -k -u -l 54321 on test target
     var urlBits = URLComponents()
     urlBits.host = "yourTestServerRunningNCAT"
@@ -18,33 +18,24 @@ final class UdpConnectionTests: XCTestCase {
     let pingExpectation = expectation(description: "Ping is echoed")
     let helloData = "Hello!".data(using: .ascii)!
     
-    _ = conn?.receiveDataPublisher
-      .sink(receiveCompletion: { completion in
-        
-      }, receiveValue: { data in
-        XCTAssertEqual(data, helloData)
-        pingExpectation.fulfill()
-      })
-    
-    _ = conn?.statePublisher.sink(
-      receiveCompletion: { completion in
-        switch completion {
-        case .failure(let nwErr):
-          XCTFail(nwErr.debugDescription)
-        default:
-          break
-        }
-      },
-      receiveValue: { state in
+    let stateWatcher = Task {
+      for await state in conn!.connectionState {
         switch state {
         case .ready:
           conn?.send(helloData)
-          
         default:
           print(state)
         }
-      })
+      }
+    }
     
+    Task {
+      for try await data in conn!.receivedData {
+        XCTAssertEqual(data, helloData)
+        pingExpectation.fulfill()
+        stateWatcher.cancel()
+      }
+    }
     
     wait(for: [pingExpectation], timeout: 10)
   }

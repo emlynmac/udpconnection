@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 import Network
 
@@ -13,7 +12,7 @@ extension UdpConnection {
     let conn = NWConnection(host: NWEndpoint.Host(host),
                             port: NWEndpoint.Port.init(rawValue: UInt16(port))!,
                             using: .udp)
-    let subject = PassthroughSubject<Data, NWError>()
+
     var cancelled = false
     
     return UdpConnection(
@@ -22,38 +21,38 @@ extension UdpConnection {
         cancelled = true
         conn.stateUpdateHandler = nil
       },
-      statePublisher: {
-        let subject = PassthroughSubject<NWConnection.State, NWError>()
-        conn.stateUpdateHandler = subject.send
-        
-        return subject
-          .handleEvents(
-            receiveSubscription: { _ in conn.start(queue: queue) }
-          )
-          .eraseToAnyPublisher()
+      connectionState: {
+        AsyncStream { continuation in
+          conn.stateUpdateHandler = {
+            continuation.yield($0)
+            if cancelled {
+              continuation.finish()
+            }
+          }
+          conn.start(queue: queue)
+        }
       }(),
-      receiveDataPublisher: {
-        var receiveMessages: (() -> Void)?
-        let receiveWrapper: ReceiveType = { data, context, complete, error in
-          if let err = error {
-            subject.send(completion: .failure(err))
-          } else if let data = data {
-            subject.send(data)
+      receivedData: {
+        AsyncThrowingStream<Data, Error> { continuation in
+          var receiveMessages: (() -> Void)?
+          let receiveWrapper: ReceiveType = { data, context, complete, error in
+            if let err = error {
+              continuation.finish(throwing: err)
+            } else if let data = data {
+              continuation.yield(data)
+            }
+            receiveMessages?()
+          }
+
+          receiveMessages = { [conn] in
+            if !cancelled {
+              conn.receiveMessage(completion: receiveWrapper)
+            } else {
+              continuation.finish()
+            }
           }
           receiveMessages?()
         }
-        
-        receiveMessages = { [conn] in
-          if !cancelled {
-            conn.receiveMessage(completion: receiveWrapper)
-          }
-        }
-        
-        return subject
-          .handleEvents(receiveSubscription: { subscription in
-            receiveMessages?()
-          })
-          .eraseToAnyPublisher()
       }(),
       remoteHost: {
         switch conn.endpoint {
